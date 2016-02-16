@@ -76,7 +76,7 @@ fn update_churn_data_for_tree(repo: &Repository, path: &str, tree: &Tree, result
     for entry in tree.iter() {
         let child_object = try!(entry.to_object(repo));
         let child_path = join(path, entry.name().unwrap());
-        update_churn_data_for_object(repo, child_path, &child_object, results);
+        try!(update_churn_data_for_object(repo, child_path, &child_object, results));
     }
     Ok(())
 }
