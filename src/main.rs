@@ -20,6 +20,7 @@ extern crate rustc_serialize;
 use docopt::Docopt;
 use git2::{Repository, Error, Revwalk, Oid, Commit, Tree, Time, Object, ObjectType};
 use std::collections::{BTreeMap, HashSet};
+use std::io::Write;
 
 #[derive(RustcDecodable)]
 struct Args {
@@ -92,6 +93,8 @@ fn config_revwalk(revwalk: &mut Revwalk, args: &Args) -> () {
     revwalk.set_sorting(base | sort_type);
 }
 
+const COMMITS_PER_DOT: usize = 1000;
+
 fn run(args: &Args) -> Result<(), git2::Error> {
     let repo = try!(Repository::open("."));
     let mut revwalk = try!(repo.revwalk());
@@ -103,13 +106,21 @@ fn run(args: &Args) -> Result<(), git2::Error> {
 
     let id:Oid = try!(repo.revparse_single(spec)).id();
     try!(revwalk.push(id));
+    let mut n = 0;
     for id in revwalk {
         let commit = try!(repo.find_commit(id));
         let tree = try!(commit.tree());
         try!(update_churn_data_for_object(&repo, "".to_string(), tree.as_object(), &mut churn_data));
         //let my_commit = git_commit_to_my_commit(commit);
         //println!("{} {}", my_commit.oid, my_commit.summary);
+
+        n += 1;
+        if n % COMMITS_PER_DOT == 0 {
+            print!(".");
+        }
+        std::io::stdout().flush().unwrap();
     }
+    println!("");
 
     for (filename, hashes) in churn_data {
         println!("{}, {}", filename, hashes.len());
