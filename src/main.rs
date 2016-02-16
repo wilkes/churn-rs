@@ -18,7 +18,8 @@ extern crate docopt;
 extern crate rustc_serialize;
 
 use docopt::Docopt;
-use git2::{Repository, Error, Revwalk, Oid, Commit, Time};
+use git2::{Repository, Error, Revwalk, Oid, Commit, Tree, Time, ObjectType};
+use std::collections::HashMap;
 
 #[derive(RustcDecodable)]
 struct Args {
@@ -43,6 +44,36 @@ fn git_commit_to_my_commit(mut gcommit: Commit) -> MyCommit {
     }
 }
 
+type ChurnData = HashMap<String, usize>;
+
+fn join(base: &str, name: &str) -> String {
+    match base {
+        "" => name.to_string(),
+        _ => base.to_string() + "/" + name
+    }
+}
+
+fn update_churn_data_for_tree(repo: &Repository, dir: &str, tree: &Tree, results: &mut ChurnData) -> Result<(), Error> {
+    for entry in tree.iter() {
+        match entry.kind() {
+            Some(ObjectType::Tree) => {
+                let entry_object = try!(entry.to_object(repo));
+                let subtree = entry_object.as_tree().unwrap();
+                let subdir = join(dir, entry.name().unwrap());
+                try!(update_churn_data_for_tree(repo, &subdir, subtree, results));
+            }
+            Some(ObjectType::Blob) => {
+                let full_path = join(dir, entry.name().unwrap());
+                let hash_entry = results.entry(full_path);
+                let value_ref = hash_entry.or_insert(0);
+                *value_ref += 1;
+            }
+            _ => {}
+        }
+    }
+    Ok(())
+}
+
 fn config_revwalk(revwalk: &mut Revwalk, args: &Args) -> () {
     let base = if args.flag_reverse {git2::SORT_REVERSE} else {git2::SORT_NONE};
     let sort_type =  if args.flag_topo_order {
@@ -62,12 +93,20 @@ fn run(args: &Args) -> Result<(), git2::Error> {
 
     config_revwalk(&mut revwalk, args);
 
+    let mut churn_data: ChurnData = HashMap::new();
+
     let id:Oid = try!(repo.revparse_single(spec)).id();
     try!(revwalk.push(id));
     for id in revwalk {
         let commit = try!(repo.find_commit(id));
-        let my_commit = git_commit_to_my_commit(commit);
-        println!("{} {}", my_commit.oid, my_commit.summary);
+        let tree = try!(commit.tree());
+        try!(update_churn_data_for_tree(&repo, "", &tree, &mut churn_data));
+        //let my_commit = git_commit_to_my_commit(commit);
+        //println!("{} {}", my_commit.oid, my_commit.summary);
+    }
+
+    for (filename, count) in churn_data {
+        println!("{}, {}", filename, count);
     }
     Ok(())
 }
