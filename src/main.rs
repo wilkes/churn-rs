@@ -18,7 +18,7 @@ extern crate docopt;
 extern crate rustc_serialize;
 
 use docopt::Docopt;
-use git2::{Repository, Error, Revwalk, Oid, Commit, Tree, Time, Object, ObjectType};
+use git2::{Repository, Error, Revwalk, Oid, Tree, Object, ObjectType};
 use std::collections::{BTreeMap, HashSet};
 use std::io::Write;
 
@@ -29,6 +29,7 @@ struct Args {
     flag_reverse: bool,
 }
 
+/*
 struct MyCommit {
     oid: Oid,
     summary: String,
@@ -44,6 +45,7 @@ fn git_commit_to_my_commit(mut gcommit: Commit) -> MyCommit {
         committer: gcommit.committer().name().unwrap_or("<Unknown>").to_string(),
     }
 }
+*/
 
 type ChurnData = BTreeMap<String, HashSet<Oid>>;
 
