@@ -18,7 +18,7 @@ extern crate docopt;
 extern crate rustc_serialize;
 
 use docopt::Docopt;
-use git2::{Repository, Error, Revwalk, Oid, Tree, Object, ObjectType};
+use git2::{Repository, Error, Revwalk, Oid, Tree, ObjectType};
 use std::collections::{BTreeMap, HashSet};
 use std::io::Write;
 
@@ -47,7 +47,14 @@ fn git_commit_to_my_commit(mut gcommit: Commit) -> MyCommit {
 }
 */
 
-type ChurnData = BTreeMap<String, HashSet<Oid>>;
+fn get_mut_or_create_with<'a, V, F: FnOnce()->V>(
+    map: &'a mut BTreeMap<String, V>, key: &str, f: F) -> &'a mut V
+{
+    // It should be possible to avoid the .to_string() call here if the key is
+    // already present in the map, but there doesn't seem to be an API that
+    // does this yet.
+    map.entry(key.to_string()).or_insert_with(f)
+}
 
 fn join(base: &str, name: &str) -> String {
     match base {
@@ -56,31 +63,58 @@ fn join(base: &str, name: &str) -> String {
     }
 }
 
-fn update_churn_data_for_object(repo: &Repository, path: String, obj: &Object, results: &mut ChurnData) -> Result<(), Error> {
-    let added_entry = {
-        let result_entry = results.entry(path.clone());
-        let hashes = result_entry.or_insert_with(HashSet::new);
-        hashes.insert(obj.id())
-    };
-    if added_entry {
-        match obj.kind() {
-            Some(ObjectType::Tree) => {
-                let subtree = obj.as_tree().unwrap();
-                try!(update_churn_data_for_tree(repo, &path, subtree, results));
-            }
-            _ => {}
-        }
-    }
-    Ok(())
+struct DirData {
+    hashes: HashSet<Oid>,
+    files: BTreeMap<String, HashSet<Oid>>,
+    dirs: BTreeMap<String, DirData>
 }
 
-fn update_churn_data_for_tree(repo: &Repository, path: &str, tree: &Tree, results: &mut ChurnData) -> Result<(), Error> {
-    for entry in tree.iter() {
-        let child_object = try!(entry.to_object(repo));
-        let child_path = join(path, entry.name().unwrap());
-        try!(update_churn_data_for_object(repo, child_path, &child_object, results));
+impl DirData {
+    fn new() -> DirData {
+        DirData {
+            hashes: HashSet::new(),
+            files: BTreeMap::new(),
+            dirs: BTreeMap::new()
+        }
     }
-    Ok(())
+
+    fn subdir(&mut self, name: &str) -> &mut DirData {
+        get_mut_or_create_with(&mut self.dirs, name, || DirData::new())
+    }
+
+    fn dump_files_recursively(&self, path: &str) {
+        for (name, d) in &self.dirs {
+            let full_path = join(path, name);
+            d.dump_files_recursively(&full_path);
+        }
+        for (name, hashes) in &self.files {
+            let full_path = join(path, name);
+            println!("{}, {}", full_path, hashes.len());
+        }
+    }
+
+    fn update_for_tree(&mut self, repo: &Repository, tree: &Tree) -> Result<(), Error> {
+        for entry in tree.iter() {
+            let name = entry.name().unwrap();
+            let sha = entry.id();
+            match entry.kind() {
+                Some(ObjectType::Tree) => {
+                    let subdir = self.subdir(name);
+                    if subdir.hashes.insert(sha) {
+                        let child_object = try!(entry.to_object(repo));
+                        let subtree = child_object.as_tree().unwrap();
+                        try!(subdir.update_for_tree(repo, subtree));
+                    }
+                }
+                Some(ObjectType::Blob) => {
+                    let hashes = get_mut_or_create_with(&mut self.files, name, || HashSet::new());
+                    hashes.insert(sha);
+                }
+                _ => {}
+            }
+        }
+        Ok(())
+    }
 }
 
 fn config_revwalk(revwalk: &mut Revwalk, args: &Args) -> () {
@@ -104,7 +138,7 @@ fn run(args: &Args) -> Result<(), git2::Error> {
 
     config_revwalk(&mut revwalk, args);
 
-    let mut churn_data: ChurnData = ChurnData::new();
+    let mut root_dir: DirData = DirData::new();
 
     let id:Oid = try!(repo.revparse_single(spec)).id();
     try!(revwalk.push(id));
@@ -112,7 +146,7 @@ fn run(args: &Args) -> Result<(), git2::Error> {
     for id in revwalk {
         let commit = try!(repo.find_commit(id));
         let tree = try!(commit.tree());
-        try!(update_churn_data_for_object(&repo, "".to_string(), tree.as_object(), &mut churn_data));
+        try!(root_dir.update_for_tree(&repo, &tree));
         //let my_commit = git_commit_to_my_commit(commit);
         //println!("{} {}", my_commit.oid, my_commit.summary);
 
@@ -124,9 +158,7 @@ fn run(args: &Args) -> Result<(), git2::Error> {
     }
     println!("");
 
-    for (filename, hashes) in churn_data {
-        println!("{}, {}", filename, hashes.len());
-    }
+    root_dir.dump_files_recursively("");
     Ok(())
 }
 
