@@ -18,7 +18,7 @@ extern crate docopt;
 extern crate rustc_serialize;
 
 use docopt::Docopt;
-use git2::{Repository, Error, Revwalk, Oid, Commit, Tree, Time, ObjectType};
+use git2::{Repository, Error, Revwalk, Oid, Commit, Tree, Time, Object, ObjectType};
 use std::collections::{BTreeMap, HashSet};
 
 #[derive(RustcDecodable)]
@@ -53,23 +53,29 @@ fn join(base: &str, name: &str) -> String {
     }
 }
 
-fn update_churn_data_for_tree(repo: &Repository, dir: &str, tree: &Tree, results: &mut ChurnData) -> Result<(), Error> {
-    for entry in tree.iter() {
-        match entry.kind() {
+fn update_churn_data_for_object(repo: &Repository, path: String, obj: &Object, results: &mut ChurnData) -> Result<(), Error> {
+    let added_entry = {
+        let result_entry = results.entry(path.clone());
+        let hashes = result_entry.or_insert_with(HashSet::new);
+        hashes.insert(obj.id())
+    };
+    if added_entry {
+        match obj.kind() {
             Some(ObjectType::Tree) => {
-                let entry_object = try!(entry.to_object(repo));
-                let subtree = entry_object.as_tree().unwrap();
-                let subdir = join(dir, entry.name().unwrap());
-                try!(update_churn_data_for_tree(repo, &subdir, subtree, results));
-            }
-            Some(ObjectType::Blob) => {
-                let full_path = join(dir, entry.name().unwrap());
-                let hash_entry = results.entry(full_path);
-                let hashes = hash_entry.or_insert_with(HashSet::new);
-                hashes.insert(entry.id());
+                let subtree = obj.as_tree().unwrap();
+                try!(update_churn_data_for_tree(repo, &path, subtree, results));
             }
             _ => {}
         }
+    }
+    Ok(())
+}
+
+fn update_churn_data_for_tree(repo: &Repository, path: &str, tree: &Tree, results: &mut ChurnData) -> Result<(), Error> {
+    for entry in tree.iter() {
+        let child_object = try!(entry.to_object(repo));
+        let child_path = join(path, entry.name().unwrap());
+        update_churn_data_for_object(repo, child_path, &child_object, results);
     }
     Ok(())
 }
@@ -100,7 +106,7 @@ fn run(args: &Args) -> Result<(), git2::Error> {
     for id in revwalk {
         let commit = try!(repo.find_commit(id));
         let tree = try!(commit.tree());
-        try!(update_churn_data_for_tree(&repo, "", &tree, &mut churn_data));
+        try!(update_churn_data_for_object(&repo, "".to_string(), tree.as_object(), &mut churn_data));
         //let my_commit = git_commit_to_my_commit(commit);
         //println!("{} {}", my_commit.oid, my_commit.summary);
     }
