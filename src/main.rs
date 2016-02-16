@@ -19,7 +19,7 @@ extern crate rustc_serialize;
 
 use docopt::Docopt;
 use git2::{Repository, Error, Revwalk, Oid, Tree, ObjectType};
-use std::collections::{BTreeMap, HashSet};
+use std::collections::{HashMap, HashSet};
 use std::io::Write;
 
 #[derive(RustcDecodable)]
@@ -48,7 +48,7 @@ fn git_commit_to_my_commit(mut gcommit: Commit) -> MyCommit {
 */
 
 fn get_mut_or_create_with<'a, V, F: FnOnce()->V>(
-    map: &'a mut BTreeMap<String, V>, key: &str, f: F) -> &'a mut V
+    map: &'a mut HashMap<String, V>, key: &str, f: F) -> &'a mut V
 {
     // It should be possible to avoid the .to_string() call here if the key is
     // already present in the map, but there doesn't seem to be an API that
@@ -65,16 +65,16 @@ fn join(base: &str, name: &str) -> String {
 
 struct DirData {
     hashes: HashSet<Oid>,
-    files: BTreeMap<String, HashSet<Oid>>,
-    dirs: BTreeMap<String, DirData>
+    files: HashMap<String, HashSet<Oid>>,
+    dirs: HashMap<String, DirData>
 }
 
 impl DirData {
     fn new() -> DirData {
         DirData {
             hashes: HashSet::new(),
-            files: BTreeMap::new(),
-            dirs: BTreeMap::new()
+            files: HashMap::new(),
+            dirs: HashMap::new()
         }
     }
 
@@ -82,14 +82,18 @@ impl DirData {
         get_mut_or_create_with(&mut self.dirs, name, || DirData::new())
     }
 
-    fn dump_files_recursively(&self, path: &str) {
-        for (name, d) in &self.dirs {
-            let full_path = join(path, name);
-            d.dump_files_recursively(&full_path);
-        }
+    /// Add an entry to `out` for each file in this tree.
+    ///
+    /// This is like `find . -type f`: directories aren't included, but files
+    /// in subdirectories are. And the order of the output is pretty random.
+    fn get_all_files(&self, path: &str, out: &mut Vec<(String, usize)>) {
         for (name, hashes) in &self.files {
             let full_path = join(path, name);
-            println!("{}, {}", full_path, hashes.len());
+            out.push((full_path, hashes.len()));
+        }
+        for (name, subdir) in &self.dirs {
+            let full_path = join(path, name);
+            subdir.get_all_files(&full_path, out);
         }
     }
 
@@ -158,7 +162,13 @@ fn run(args: &Args) -> Result<(), git2::Error> {
     }
     println!("");
 
-    root_dir.dump_files_recursively("");
+    let mut all_files = vec![];
+    root_dir.get_all_files("", &mut all_files);
+    all_files.sort();
+    for (filename, churn_count) in all_files {
+        println!("{}, {}", filename, churn_count);
+    }
+
     Ok(())
 }
 
