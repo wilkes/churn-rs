@@ -19,7 +19,7 @@ extern crate rustc_serialize;
 
 use docopt::Docopt;
 use git2::{Repository, Error, Revwalk, Oid, Commit, Tree, Time, ObjectType};
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashSet};
 
 #[derive(RustcDecodable)]
 struct Args {
@@ -44,7 +44,7 @@ fn git_commit_to_my_commit(mut gcommit: Commit) -> MyCommit {
     }
 }
 
-type ChurnData = HashMap<String, usize>;
+type ChurnData = BTreeMap<String, HashSet<Oid>>;
 
 fn join(base: &str, name: &str) -> String {
     match base {
@@ -65,8 +65,8 @@ fn update_churn_data_for_tree(repo: &Repository, dir: &str, tree: &Tree, results
             Some(ObjectType::Blob) => {
                 let full_path = join(dir, entry.name().unwrap());
                 let hash_entry = results.entry(full_path);
-                let value_ref = hash_entry.or_insert(0);
-                *value_ref += 1;
+                let hashes = hash_entry.or_insert_with(HashSet::new);
+                hashes.insert(entry.id());
             }
             _ => {}
         }
@@ -93,7 +93,7 @@ fn run(args: &Args) -> Result<(), git2::Error> {
 
     config_revwalk(&mut revwalk, args);
 
-    let mut churn_data: ChurnData = HashMap::new();
+    let mut churn_data: ChurnData = ChurnData::new();
 
     let id:Oid = try!(repo.revparse_single(spec)).id();
     try!(revwalk.push(id));
@@ -105,8 +105,8 @@ fn run(args: &Args) -> Result<(), git2::Error> {
         //println!("{} {}", my_commit.oid, my_commit.summary);
     }
 
-    for (filename, count) in churn_data {
-        println!("{}, {}", filename, count);
+    for (filename, hashes) in churn_data {
+        println!("{}, {}", filename, hashes.len());
     }
     Ok(())
 }
