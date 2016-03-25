@@ -136,7 +136,7 @@ fn run(dirname: &str) -> Result<(), git2::Error> {
     try!(revwalk.push(id));
     let mut n = 0;
     for id in revwalk {
-        let commit = try!(repo.find_commit(id));
+        let commit = try!(repo.find_commit(try!(id)));
         let tree = try!(commit.tree());
         try!(root_dir.update_for_tree(&repo, &tree));
         //let my_commit = git_commit_to_my_commit(commit);
