@@ -1,5 +1,5 @@
 [package]
-name = "gitlog"
+name = "churn"
 version = "0.1.0"
 authors = ["wilkes <wilkesjoiner@gmail.com>"]
 
