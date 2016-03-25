@@ -152,7 +152,7 @@ fn run(dirname: &str) -> Result<(), git2::Error> {
     root_dir.get_all_files("", &mut all_files);
     all_files.sort();
     for (filename, churn_count) in all_files {
-        println!("{}, {}", filename, churn_count);
+        println!("{:7} {}", churn_count, filename);
     }
 
     Ok(())
