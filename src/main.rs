@@ -1,61 +1,38 @@
-/*
- * libgit2 "rev-list" example - shows how to transform a rev-spec into a list
- * of commit ids
- *
- * Written by the libgit2 contributors
- *
- * To the extent possible under law, the author(s) have dedicated all copyright
- * and related and neighboring rights to this software to the public domain
- * worldwide. This software is distributed without any warranty.
- *
- * You should have received a copy of the CC0 Public Domain Dedication along
- * with this software. If not, see
- * <http://creativecommons.org/publicdomain/zero/1.0/>.
- */
+// churn - Count how many versions exist of each file in a git repository.
 
 extern crate git2;
 extern crate docopt;
-extern crate rustc_serialize;
 
 use docopt::Docopt;
-use git2::{Repository, Error, Revwalk, Oid, Tree, ObjectType};
+use git2::{Repository, Error, Oid, Tree, ObjectType};
 use std::collections::{HashMap, HashSet};
 use std::io::Write;
 
-#[derive(RustcDecodable)]
-struct Args {
-    flag_topo_order: bool,
-    flag_date_order: bool,
-    flag_reverse: bool,
-}
-
-/*
-struct MyCommit {
-    oid: Oid,
-    summary: String,
-    committer: String,
-    time: Time,
-}
-
-fn git_commit_to_my_commit(mut gcommit: Commit) -> MyCommit {
-    MyCommit {
-        oid: gcommit.id(),
-        summary: gcommit.summary().unwrap_or("").to_string(),
-        time: gcommit.time(),
-        committer: gcommit.committer().name().unwrap_or("<Unknown>").to_string(),
-    }
-}
-*/
-
+/// Get or create a HashMap entry.
+///
+/// If the given `map` does *not* already have an entry with the given `key`,
+/// this inserts the pair `(key, f())` into the map.
+///
+/// Returns a mut reference to `map[key]`.
+///
 fn get_mut_or_create_with<'a, V, F: FnOnce()->V>(
     map: &'a mut HashMap<String, V>, key: &str, f: F) -> &'a mut V
 {
-    // It should be possible to avoid the .to_string() call here if the key is
-    // already present in the map, but there doesn't seem to be an API that
-    // does this yet.
+    // Pure optimization: the one-liner below is correct, but since this path
+    // is hot, we indulge in a little unsafe code to avoid the expense of
+    // `key.to_string()` when the entry already exists (the common case for
+    // most repositories).
+    unsafe {
+        let p_map: *mut HashMap<String, V> = map;
+        if let Some(r) = (*p_map).get_mut(key) {
+            return r;
+        }
+    }
+
     map.entry(key.to_string()).or_insert_with(f)
 }
 
+/// Join a directory path `base` to a filename `name`.
 fn join(base: &str, name: &str) -> String {
     match base {
         "" => name.to_string(),
@@ -63,9 +40,31 @@ fn join(base: &str, name: &str) -> String {
     }
 }
 
+/// Cumulative version counts for everything under one directory of a
+/// repository, including subdirectories.
+///
+/// The basic algorithm here is to create a root `DirData`, update it for every
+/// commit in the repository, then get the results out of the resulting tree of
+/// `DirData` records.
 struct DirData {
+    /// Set of all Git "tree" hashes ever seen for this directory.
+    ///
+    /// A Git "tree" is a snapshot of a directory. When we query Git for a
+    /// given commit, Git doesn't give us a patch telling what was changed in
+    /// that commit. Instead, it gives us a complete snapshot of *all* files
+    /// and directories in that commit, including files and directories that
+    /// did not change.
+    ///
+    /// Therefore we have to keep the set of all hashes we've seen for every
+    /// directory (this field) and every file (`DirData::files`) to avoid
+    /// overcounting directories or doing redundant work.
     hashes: HashSet<Oid>,
+
+    /// Table of all blob hashes ever seen for each file in this directory.
     files: HashMap<String, HashSet<Oid>>,
+
+    /// Each subdirectory that ever existed under this directory gets its own
+    /// `DirData` record.
     dirs: HashMap<String, DirData>
 }
 
@@ -78,6 +77,8 @@ impl DirData {
         }
     }
 
+    /// Get a `DirData` record for a subdirectory of this dir, creating a new
+    /// record if we don't already have one.
     fn subdir(&mut self, name: &str) -> &mut DirData {
         get_mut_or_create_with(&mut self.dirs, name, || DirData::new())
     }
@@ -121,26 +122,13 @@ impl DirData {
     }
 }
 
-fn config_revwalk(revwalk: &mut Revwalk, args: &Args) -> () {
-    let base = if args.flag_reverse {git2::SORT_REVERSE} else {git2::SORT_NONE};
-    let sort_type =  if args.flag_topo_order {
-                         git2::SORT_TOPOLOGICAL
-                     } else if args.flag_date_order {
-                         git2::SORT_TIME
-                     } else {
-                         git2::SORT_NONE
-                     };
-    revwalk.set_sorting(base | sort_type);
-}
-
 const COMMITS_PER_DOT: usize = 1000;
 
-fn run(args: &Args) -> Result<(), git2::Error> {
-    let repo = try!(Repository::open("."));
+fn run(dirname: &str) -> Result<(), git2::Error> {
+    let repo = try!(Repository::open(dirname));
     let mut revwalk = try!(repo.revwalk());
+    revwalk.set_sorting(git2::SORT_NONE);
     let spec = "HEAD";
-
-    config_revwalk(&mut revwalk, args);
 
     let mut root_dir: DirData = DirData::new();
 
@@ -174,18 +162,21 @@ fn run(args: &Args) -> Result<(), git2::Error> {
 
 fn main() {
     const USAGE: &'static str = "
-usage: rev-list [options]
+usage: gitlog [options] [<dir>]
 
 Options:
-    --topo-order        sort commits in topological order
-    --date-order        sort commits in date order
-    --reverse           sort commits in reverse
     -h, --help          show this message
 ";
 
-    let args = Docopt::new(USAGE).and_then(|d| d.decode())
-                                 .unwrap_or_else(|e| e.exit());
-    match run(&args) {
+    let args =
+        Docopt::new(USAGE)
+        .and_then(|d| d.parse())
+        .unwrap_or_else(|e| e.exit());
+    let dir = match args.get_str("<dir>") {
+        "" => ".",
+        d => d
+    };
+    match run(dir) {
         Ok(()) => {}
         Err(e) => println!("error: {}", e),
     }

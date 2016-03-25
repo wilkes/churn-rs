@@ -6,4 +6,3 @@ authors = ["wilkes <wilkesjoiner@gmail.com>"]
 [dependencies]
 git2 = "0.3"
 docopt = "0.6"
-rustc-serialize = "0.3"
