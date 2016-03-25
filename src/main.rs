@@ -139,8 +139,6 @@ fn run(dirname: &str) -> Result<(), git2::Error> {
         let commit = try!(repo.find_commit(try!(id)));
         let tree = try!(commit.tree());
         try!(root_dir.update_for_tree(&repo, &tree));
-        //let my_commit = git_commit_to_my_commit(commit);
-        //println!("{} {}", my_commit.oid, my_commit.summary);
 
         n += 1;
         if n % COMMITS_PER_DOT == 0 {
