@@ -4,13 +4,14 @@ Count how many versions exist of each file in a git repository.
 
 Usage:
 
-    $ churn
-          1 .gitignore
-          4 Cargo.lock
-          4 Cargo.toml
-          1 README.md
-         13 src/main.rs
-
+```
+$ churn     
+       15 src/main.rs
+        5 Cargo.toml
+        5 Cargo.lock
+        1 README.md
+        1 .gitignore
+```
 This prints the name of every file that ever existed in `HEAD` or any
 preceding commit, along with the number of different versions of that
 file in those commits.
