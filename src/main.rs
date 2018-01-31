@@ -150,7 +150,7 @@ fn run(dirname: &str) -> Result<(), git2::Error> {
 
     let mut all_files = vec![];
     root_dir.get_all_files("", &mut all_files);
-    all_files.sort();
+    all_files.sort_by(|a,b| a.1.cmp(&b.1).reverse());
     for (filename, churn_count) in all_files {
         println!("{:7} {}", churn_count, filename);
     }
