@@ -106,9 +106,9 @@ impl DirData {
                 Some(ObjectType::Tree) => {
                     let subdir = self.subdir(name);
                     if subdir.hashes.insert(sha) {
-                        let child_object = try!(entry.to_object(repo));
+                        let child_object = entry.to_object(repo)?;
                         let subtree = child_object.as_tree().unwrap();
-                        try!(subdir.update_for_tree(repo, subtree));
+                        subdir.update_for_tree(repo, subtree)?;
                     }
                 }
                 Some(ObjectType::Blob) => {
@@ -125,20 +125,20 @@ impl DirData {
 const COMMITS_PER_DOT: usize = 1000;
 
 fn run(dirname: &str) -> Result<(), git2::Error> {
-    let repo = try!(Repository::open(dirname));
-    let mut revwalk = try!(repo.revwalk());
+    let repo = Repository::open(dirname)?;
+    let mut revwalk = repo.revwalk()?;
     revwalk.set_sorting(git2::SORT_NONE);
     let spec = "HEAD";
 
     let mut root_dir: DirData = DirData::new();
 
-    let id:Oid = try!(repo.revparse_single(spec)).id();
-    try!(revwalk.push(id));
+    let id:Oid = repo.revparse_single(spec)?.id();
+    revwalk.push(id)?;
     let mut n = 0;
     for id in revwalk {
-        let commit = try!(repo.find_commit(try!(id)));
-        let tree = try!(commit.tree());
-        try!(root_dir.update_for_tree(&repo, &tree));
+        let commit = repo.find_commit(id?)?;
+        let tree = commit.tree()?;
+        root_dir.update_for_tree(&repo, &tree)?;
 
         n += 1;
         if n % COMMITS_PER_DOT == 0 {
@@ -146,7 +146,7 @@ fn run(dirname: &str) -> Result<(), git2::Error> {
         }
         std::io::stdout().flush().unwrap();
     }
-    println!("");
+    println!();
 
     let mut all_files = vec![];
     root_dir.get_all_files("", &mut all_files);
